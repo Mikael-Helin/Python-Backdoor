@@ -18,9 +18,9 @@ if ! [ -x "$(command -v pip3)" ]; then
   exit 1
 fi
 
-# Test if venv is installed
-if ! [ -x "$(command -v venv)" ]; then
-  echo 'Error: venv is not installed.' >&2
+# Test if python3-venv is installed
+if ! python3 -m venv --help > /dev/null 2>&1; then
+  echo 'Error: python3-venv is not installed.' >&2
   exit 1
 fi
 
