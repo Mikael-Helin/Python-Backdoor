@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+
+set -e
+
+VERSION="0.0.1"
+DATE="2021-09-25"
+AUTHOR="Mikael Helin"
+
+BASE_DIR="/opt/backdoor"
+CONFIG_DIR="$BASE_DIR/config"
+TMP_DIR="$BASE_DIR/tmp"
+LOG_DIR="$BASE_DIR/logs"
+BIN_DIR="$BASE_DIR/bin"
+BACKDOOR_CMD="$BIN_DIR/backdoor"
+
+# Ensure necessary directories exist
+mkdir -p "$TMP_DIR" "$LOG_DIR"
+
+# Check if the user is root
+if [[ $(id -u) -ne 0 ]]; then
+    echo "You must be root to run this script"
+    exit 1
+fi
+
+# Check if .env file exists
+if [[ ! -f "$CONFIG_DIR/.env" ]]; then
+    echo "$CONFIG_DIR/.env file not found"
+    exit 1
+fi
+
+# Check if argument is provided
+if [[ -z "$1" ]]; then
+    echo "Usage: $0 <argument>"
+    exit 1
+fi
+
+# Help function
+function help {
+    cat << EOF
+Usage: $0 <argument>
+Arguments:
+  start   - Start the backdoor service
+  stop    - Stop the backdoor service
+  restart - Restart the backdoor service
+  status  - Check the status of the backdoor service
+  version - Print the version of the backdoor service
+  help    - Print this help message
+EOF
+}
+
+# Valid arguments
+valid_arguments=("start" "stop" "restart" "status" "version" "help")
+
+# Check if argument is valid
+if [[ ! " ${valid_arguments[@]} " =~ " $1 " ]]; then
+    echo "Invalid argument: $1"
+    help
+    exit 1
+fi
+
+# Read PID function
+function read_pid {
+    if [[ -f "$TMP_DIR/.pid" ]]; then
+        cat "$TMP_DIR/.pid"
+    else
+        echo "0"
+    fi
+}
+
+# Read lockfile function
+function lock_exists {
+    [[ -d "$TMP_DIR/.lock" ]]
+}
+
+# Start function
+function start {
+    pid=$(read_pid)
+
+    if lock_exists; then
+        if ps -p "$pid" > /dev/null 2>&1; then
+            echo "Backdoor is already running with PID: $pid"
+            exit 0
+        else
+            echo "Removing stale lock and PID file"
+            rm -rf "$TMP_DIR/.lock"
+            rm -f "$TMP_DIR/.pid"
+        fi
+    fi
+
+    echo "Starting backdoor service"
+    mkdir "$TMP_DIR/.lock"
+
+    nohup "$BACKDOOR_CMD" > "$LOG_DIR/backdoor.log" 2>&1 &
+    pid=$!
+    echo "$pid" > "$TMP_DIR/.pid"
+
+    # Verify service started
+    if ! kill -0 "$pid" 2>/dev/null; then
+        echo "Failed to start backdoor service"
+        rm -rf "$TMP_DIR/.lock"
+        rm -f "$TMP_DIR/.pid"
+        exit 1
+    fi
+
+    echo "Backdoor service started with PID: $pid"
+}
+
+# Stop function
+function stop {
+    pid=$(read_pid)
+
+    if ! lock_exists || [[ "$pid" == "0" ]]; then
+        echo "Backdoor service is not running"
+        rm -rf "$TMP_DIR/.lock"
+        rm -f "$TMP_DIR/.pid"
+        exit 0
+    fi
+
+    echo "Stopping backdoor service with PID: $pid"
+    kill "$pid" 2>/dev/null || echo "Process already stopped"
+
+    rm -rf "$TMP_DIR/.lock"
+    rm -f "$TMP_DIR/.pid"
+    echo "Backdoor service stopped"
+}
+
+# Status function
+function status {
+    pid=$(read_pid)
+
+    if lock_exists && ps -p "$pid" > /dev/null 2>&1; then
+        echo "Backdoor is running with PID: $pid"
+    else
+        echo "Backdoor is not running"
+    fi
+}
+
+# Version function
+function version {
+    source "$CONFIG_DIR/.env"
+    echo "Backdoor version: ${VERSION:-unknown}"
+}
+
+# Main control flow
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        stop
+        start
+        ;;
+    status)
+        status
+        ;;
+    version)
+        version
+        ;;
+    help)
+        help
+        ;;
+    *)
+        echo "Invalid argument: $1"
+        help
+        exit 1
+        ;;
+esac
+
+exit 0
